@@ -68,6 +68,12 @@ type WalletState = {
   /** Move the wallet to the configured chain, adding it first if unknown. */
   readonly switchNetwork: () => Promise<void>;
   readonly switching: boolean;
+  /**
+   * The wallet answered, but granted no account. Not an error: a state the user
+   * can resolve by authorising, so it is offered as an action rather than a
+   * red banner.
+   */
+  readonly needsAuthorization: boolean;
 };
 
 const WalletContext = createContext<WalletState | null>(null);
@@ -112,6 +118,53 @@ function chainParamsFor(config: ReturnType<typeof requireConfig>) {
 
 /** MetaMask's code for "that chain is not in the wallet yet". */
 const CHAIN_NOT_ADDED = 4902;
+/** EIP-1193: the user dismissed the prompt. */
+const USER_REJECTED = 4001;
+
+function firstAddress(value: unknown): Address | null {
+  const candidate = Array.isArray(value) ? value[0] : null;
+  return typeof candidate === "string" && /^0x[0-9a-fA-F]{40}$/.test(candidate)
+    ? (candidate as Address)
+    : null;
+}
+
+/**
+ * Get an account out of the wallet, escalating only as far as needed.
+ *
+ * `client.getAddresses()` is viem's, and viem asks `eth_accounts`, which by
+ * specification **never prompts**: it reports accounts already shared with this
+ * site and returns an empty array otherwise. `client.connect()` requests the
+ * GenLayer Snap, but nothing in that path asks for account access. So on any
+ * browser that has not authorised this origin before - every first visit to a
+ * deployment - connect succeeds and then hands back nothing, which is where
+ * "The wallet connected but returned no account" came from.
+ *
+ * Three steps, quietest first, so an already-authorised user sees no popup:
+ *
+ *   1. eth_accounts        - silent; succeeds for a returning user.
+ *   2. eth_requestAccounts - prompts, and unlocks a locked wallet.
+ *   3. wallet_requestPermissions - forces the account picker even when the
+ *      site is already permitted, which is the only way out of the state where
+ *      permission exists but every account behind it has been deselected.
+ */
+async function resolveAccount(
+  client: { getAddresses: () => Promise<readonly unknown[]> },
+  provider: EthereumProvider,
+): Promise<Address | null> {
+  const silent = firstAddress(await client.getAddresses());
+  if (silent) return silent;
+
+  const prompted = firstAddress(
+    await provider.request({ method: "eth_requestAccounts" }),
+  );
+  if (prompted) return prompted;
+
+  await provider.request({
+    method: "wallet_requestPermissions",
+    params: [{ eth_accounts: {} }],
+  });
+  return firstAddress(await provider.request({ method: "eth_accounts" }));
+}
 
 function errorCode(error: unknown): number | null {
   const direct = (error as { code?: unknown })?.code;
@@ -143,6 +196,7 @@ function networkStatusFor(
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [connecting, setConnecting] = useState(false);
   const [switching, setSwitching] = useState(false);
+  const [needsAuth, setNeedsAuthorization] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // The connected address is browser state, not React state, so it is read
@@ -236,15 +290,28 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       });
       // Explicit. The default is "studionet", not this client's chain.
       await client.connect(CONNECT_NETWORK_NAMES[config.networkName] as never);
-      const accounts = await client.getAddresses();
-      const account = accounts?.[0];
+
+      const account = await resolveAccount(client, provider);
       if (!account) {
-        throw new Error("The wallet connected but returned no account.");
+        // The wallet is reachable and answered; it simply has not granted an
+        // account. Nothing is broken, so this is not reported as a failure -
+        // the header offers the authorisation step instead.
+        setNeedsAuthorization(true);
+        return;
       }
+
+      setNeedsAuthorization(false);
       storedAddress.write(account);
       await walletChainId.refresh();
     } catch (caught) {
       const message = caught instanceof Error ? caught.message : String(caught);
+      if (errorCode(caught) === USER_REJECTED) {
+        // Declining is a choice, not a fault. Leave the authorisation prompt up
+        // so a change of mind is one click away.
+        setNeedsAuthorization(true);
+        setError(null);
+        return;
+      }
       setError(
         /snap/i.test(message) && /install|not found/i.test(message)
           ? "The GenLayer Snap is not installed in MetaMask. Install it, then connect again."
@@ -339,8 +406,22 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       disconnect,
       switchNetwork,
       switching,
+      // Derived against the address so that an account arriving by any route -
+      // including the accountsChanged event - clears the prompt immediately,
+      // with no second piece of state to fall out of step.
+      needsAuthorization: needsAuth && !address,
     }),
-    [address, connecting, error, network, connect, disconnect, switchNetwork, switching],
+    [
+      address,
+      connecting,
+      error,
+      network,
+      connect,
+      disconnect,
+      switchNetwork,
+      switching,
+      needsAuth,
+    ],
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;

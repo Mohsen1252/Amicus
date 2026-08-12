@@ -131,7 +131,8 @@ function ThemeToggle() {
 }
 
 function ConnectControl() {
-  const { address, connecting, error, connect, disconnect } = useWallet();
+  const { address, connecting, error, connect, disconnect, needsAuthorization } =
+    useWallet();
 
   if (address) {
     return (
@@ -156,18 +157,32 @@ function ConnectControl() {
 
   return (
     <span className="flex items-center gap-2">
-      {error ? (
+      {/*
+        A wallet that granted no account is not a failure, so it does not get
+        the alarm colour. It is a step the user has not taken yet, phrased as
+        the step. The raw error is reserved for the cases that really are one -
+        no provider, or a Snap that will not install.
+      */}
+      {needsAuthorization ? (
+        <span className="max-w-xs text-xs text-ink-muted">
+          MetaMask has not shared an account with this site yet.
+        </span>
+      ) : error ? (
         <span className="max-w-xs text-xs text-flag" role="alert">
           {error}
         </span>
       ) : null}
       <button
         type="button"
-        onClick={connect}
+        onClick={() => void connect()}
         disabled={connecting}
         className="border border-accent px-2 py-1 text-xs text-accent hover:bg-accent-wash disabled:opacity-60"
       >
-        {connecting ? "Connecting…" : "Connect wallet"}
+        {connecting
+          ? "Connecting…"
+          : needsAuthorization
+            ? "Click to Authorize Account"
+            : "Connect wallet"}
       </button>
     </span>
   );
