@@ -1,0 +1,51 @@
+# gltest configuration.
+#
+# Valid root keys are `networks`, `paths` and `environment`.
+#
+# Two sharp edges worth knowing, both found the hard way:
+#
+#  * A `networks` block MUST carry a `default` key. The loader does
+#    `networks.pop("default")` with no fallback and raises KeyError otherwise.
+#  * Supplying a `networks` block REPLACES the built-in networks rather than
+#    merging with them, so every network you intend to use with --network has
+#    to be listed here - otherwise you get "Unknown network: studionet".
+#
+# This file is also read for direct-mode runs, and `${VAR}` placeholders resolve
+# eagerly: an unset variable is a hard error before a single test collects,
+# which is why the funded-account block is commented out.
+paths:
+  contracts: contracts/
+  artifacts: artifacts/
+
+networks:
+  default: localnet
+
+  # A local GenLayer Studio (`genlayer up`, Docker) on its usual port.
+  #
+  # GLSim (`glsim --port 4000 --validators 5`) also serves this role and needs
+  # no Docker, but it CANNOT run this suite: GLSim executes contracts natively
+  # in one long-lived Python process and can only import a given contract source
+  # once. `factory.deploy()` imports twice (once to deploy, once to fetch the
+  # schema), so the second import fails with a misleading
+  #   ('class is not marked for usage within storage ...', <class Address>)
+  # for any contract with an `Address` storage field - Amicus or otherwise.
+  # See the note in tests/integration/test_amicus.py.
+  localnet:
+    url: http://127.0.0.1:4000/api
+
+  # Hosted Studio: real GenVM, gasless, accounts arrive with about 1 GEN.
+  # Rate limited, so this suite waits for every receipt before the next send.
+  #     gltest tests/integration/ -v -s --network studionet
+  studionet:
+    id: 61999
+    url: https://studio.genlayer.com/api
+    chain_type: studionet
+
+  # Bradbury needs funded accounts: copy .env.example to .env and uncomment.
+  # testnet_bradbury:
+  #   id: 4221
+  #   url: https://rpc-bradbury.genlayer.com
+  #   chain_type: testnet_bradbury
+  #   accounts:
+  #     - "${ACCOUNT_PRIVATE_KEY_1}"
+  #     - "${ACCOUNT_PRIVATE_KEY_2}"
