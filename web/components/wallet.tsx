@@ -64,7 +64,10 @@ type WalletState = {
   readonly error: string | null;
   readonly network: NetworkStatus;
   readonly connect: () => Promise<void>;
-  readonly disconnect: () => void;
+  readonly disconnect: () => Promise<void>;
+  /** Move the wallet to the configured chain, adding it first if unknown. */
+  readonly switchNetwork: () => Promise<void>;
+  readonly switching: boolean;
 };
 
 const WalletContext = createContext<WalletState | null>(null);
@@ -79,6 +82,42 @@ function getProvider(): EthereumProvider | null {
   if (typeof window === "undefined") return null;
   const injected = (window as { ethereum?: EthereumProvider }).ethereum;
   return injected ?? null;
+}
+
+/** `0x`-prefixed hex chain id, the only form the wallet RPC methods accept. */
+function chainIdHex(id: number): string {
+  return `0x${id.toString(16)}`;
+}
+
+/**
+ * The chain description `wallet_addEthereumChain` wants.
+ *
+ * Every field is taken from the configured chain rather than written out, so
+ * pointing the app at a different network cannot leave a stale name or symbol
+ * behind in someone's wallet. For StudioNet this resolves to
+ * "Genlayer Studio Network", https://studio.genlayer.com/api, GEN, chain 0xf22f.
+ */
+function chainParamsFor(config: ReturnType<typeof requireConfig>) {
+  const explorer = config.chain.blockExplorers?.default?.url;
+  return {
+    chainId: chainIdHex(config.chain.id),
+    chainName: config.chain.name,
+    rpcUrls: [config.rpcUrl],
+    nativeCurrency: config.chain.nativeCurrency,
+    // MetaMask rejects the whole call on a malformed explorer entry, so it is
+    // omitted rather than sent empty when a chain does not declare one.
+    ...(explorer ? { blockExplorerUrls: [explorer] } : {}),
+  };
+}
+
+/** MetaMask's code for "that chain is not in the wallet yet". */
+const CHAIN_NOT_ADDED = 4902;
+
+function errorCode(error: unknown): number | null {
+  const direct = (error as { code?: unknown })?.code;
+  if (typeof direct === "number") return direct;
+  const nested = (error as { cause?: { code?: unknown } })?.cause?.code;
+  return typeof nested === "number" ? nested : null;
 }
 
 /**
@@ -103,6 +142,7 @@ function networkStatusFor(
 
 export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [connecting, setConnecting] = useState(false);
+  const [switching, setSwitching] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
   // The connected address is browser state, not React state, so it is read
@@ -131,6 +171,46 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     if (address) void walletChainId.refresh();
   }, [address]);
+
+  /**
+   * Follow the wallet's own account state.
+   *
+   * Without this the app keeps showing whichever account was connected first.
+   * That is not a cosmetic staleness: the case view decides "You are the
+   * claimant" from this address and offers actions on the strength of it, so a
+   * user who switches accounts in MetaMask would be shown one identity's role
+   * while signing as another.
+   *
+   * Registered unconditionally rather than only while connected, so connecting
+   * from inside MetaMask is picked up too. Writing to the address store is a
+   * push from an external system, which is what an event subscription is for.
+   */
+  useEffect(() => {
+    const provider = getProvider();
+    if (!provider?.on || !provider.removeListener) return;
+
+    const onAccountsChanged = (...args: unknown[]) => {
+      const accounts = args[0];
+      const next = Array.isArray(accounts) ? accounts[0] : null;
+      // An empty array is MetaMask reporting the site was disconnected from its
+      // side. Same destination as pressing Disconnect here.
+      storedAddress.write(
+        typeof next === "string" && /^0x[0-9a-fA-F]{40}$/.test(next) ? next : null,
+      );
+      void walletChainId.refresh();
+    };
+
+    const onDisconnect = () => {
+      storedAddress.write(null);
+    };
+
+    provider.on("accountsChanged", onAccountsChanged as never);
+    provider.on("disconnect", onDisconnect as never);
+    return () => {
+      provider.removeListener?.("accountsChanged", onAccountsChanged as never);
+      provider.removeListener?.("disconnect", onDisconnect as never);
+    };
+  }, []);
 
   // Derived, not stored. With no account there is nothing to check, and that is
   // a fact about the current address rather than a state to be reset into -
@@ -175,14 +255,92 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     }
   }, []);
 
-  const disconnect = useCallback(() => {
+  /**
+   * Put the wallet on the configured chain.
+   *
+   * `connect()` already does this on the way in, but a user who switches
+   * networks afterwards had no way back except doing it by hand in MetaMask.
+   * Switch first and only add on the specific "chain not added" code: adding a
+   * chain the wallet already has prompts the user for no reason.
+   */
+  const switchNetwork = useCallback(async () => {
+    setSwitching(true);
+    setError(null);
+    try {
+      const provider = getProvider();
+      if (!provider) throw new Error("No Ethereum provider found.");
+      const config = requireConfig();
+      const target = chainIdHex(config.chain.id);
+
+      try {
+        await provider.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: target }],
+        });
+      } catch (caught) {
+        if (errorCode(caught) !== CHAIN_NOT_ADDED) throw caught;
+        await provider.request({
+          method: "wallet_addEthereumChain",
+          params: [chainParamsFor(config)],
+        });
+        // MetaMask usually switches as part of adding, but it is not contractual.
+        // Asking again is idempotent and makes the outcome certain.
+        await provider.request({
+          method: "wallet_switchEthereumChain",
+          params: [{ chainId: target }],
+        });
+      }
+      await walletChainId.refresh();
+    } catch (caught) {
+      const message = caught instanceof Error ? caught.message : String(caught);
+      setError(
+        errorCode(caught) === 4001
+          ? "You declined the network switch. The app is still on the wrong network."
+          : message,
+      );
+    } finally {
+      setSwitching(false);
+    }
+  }, []);
+
+  /**
+   * Detach the wallet.
+   *
+   * Clearing the stored address is not enough on its own. MetaMask remembers
+   * that this site is authorised, so the next Connect resolves instantly from
+   * that memory with no prompt - which reads as a button that does nothing, and
+   * makes it impossible to pick a different account. Revoking the permission is
+   * what actually returns the user to a state where connecting asks again.
+   */
+  const disconnect = useCallback(async () => {
     setError(null);
     storedAddress.write(null);
+    const provider = getProvider();
+    if (!provider) return;
+    try {
+      await provider.request({
+        method: "wallet_revokePermissions",
+        params: [{ eth_accounts: {} }],
+      });
+    } catch {
+      // Not every provider implements this, and it is not required for
+      // correctness: this app's own state is already cleared, which is what
+      // disconnect means here. Only the re-prompt is lost.
+    }
   }, []);
 
   const value = useMemo(
-    () => ({ address, connecting, error, network, connect, disconnect }),
-    [address, connecting, error, network, connect, disconnect],
+    () => ({
+      address,
+      connecting,
+      error,
+      network,
+      connect,
+      disconnect,
+      switchNetwork,
+      switching,
+    }),
+    [address, connecting, error, network, connect, disconnect, switchNetwork, switching],
   );
 
   return <WalletContext.Provider value={value}>{children}</WalletContext.Provider>;
@@ -213,3 +371,4 @@ export function networkWarning(network: NetworkStatus): string | null {
   }
   return null;
 }
+

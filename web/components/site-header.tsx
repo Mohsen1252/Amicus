@@ -59,18 +59,30 @@ export function SiteHeader() {
  * proposal. Here it is in front of them from the moment it becomes true.
  */
 function NetworkWarning() {
-  const { address, network } = useWallet();
+  const { address, network, switchNetwork, switching } = useWallet();
   if (!address) return null;
   const warning = networkWarning(network);
   if (!warning) return null;
   return (
-    <p
+    <div
       role="alert"
-      className="mt-3 border border-flag bg-flag-wash px-3 py-2 text-sm text-ink"
+      className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-2 border border-flag bg-flag-wash px-3 py-2"
     >
-      <span className="stamp mr-2 text-flag">Wrong network</span>
-      {warning}
-    </p>
+      <p className="text-sm text-ink">
+        <span className="stamp mr-2 text-flag">Wrong network</span>
+        {warning}
+      </p>
+      {/* Telling someone to switch without offering to do it leaves them to
+          find the right chain by hand. This asks the wallet directly. */}
+      <button
+        type="button"
+        onClick={() => void switchNetwork()}
+        disabled={switching}
+        className="ml-auto shrink-0 border border-flag px-2.5 py-1 text-xs text-flag hover:bg-flag/10 disabled:opacity-60"
+      >
+        {switching ? "Switching…" : "Switch network"}
+      </button>
+    </div>
   );
 }
 
@@ -133,7 +145,7 @@ function ConnectControl() {
         </span>
         <button
           type="button"
-          onClick={disconnect}
+          onClick={() => void disconnect()}
           className="border border-rule px-2 py-1 text-xs text-ink-muted hover:border-rule-strong hover:text-ink"
         >
           Disconnect
