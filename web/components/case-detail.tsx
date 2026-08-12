@@ -41,7 +41,7 @@ import {
   StateBadge,
   Timestamp,
 } from "./primitives";
-import { ErrorPanel, LoadingBlock } from "./states";
+import { ErrorPanel, LoadingBlock, StaleNotice } from "./states";
 import { AgreementText, PartyFiling, UrlText } from "./untrusted-text";
 import { useWallet } from "./wallet";
 
@@ -49,7 +49,9 @@ export function CaseDetail({ caseId }: { caseId: string }) {
   const { data, error, isLoading, mutate } = useCaseBundle(caseId);
   const { address } = useWallet();
 
-  if (error) {
+  // A failed refresh with a cached case in hand is a note, not a takeover: the
+  // record on screen is still what the chain last reported.
+  if (error && !data) {
     // The contract's own reason, dug out of the receipt. Testing the thrown
     // message directly does not work: genlayer-js replaces it with a generic
     // viem sentence about invalid parameters. See describeReadError.
@@ -98,6 +100,7 @@ export function CaseDetail({ caseId }: { caseId: string }) {
   return (
     <div className="py-8">
       <BackLink />
+      {error ? <div className="mt-4"><StaleNotice error={error} /></div> : null}
 
       <header className="mt-5 flex flex-wrap items-start justify-between gap-4">
         <div>

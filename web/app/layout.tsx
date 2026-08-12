@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { IBM_Plex_Mono, IBM_Plex_Sans, IBM_Plex_Serif } from "next/font/google";
 
 import { ConfigGate } from "@/components/config-gate";
+import { DataProvider } from "@/components/data-provider";
 import { SiteHeader } from "@/components/site-header";
 import { WalletProvider } from "@/components/wallet";
 import "./globals.css";
@@ -52,6 +53,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       </head>
       <body className="flex min-h-full flex-col antialiased">
         <ConfigGate>
+          <DataProvider>
           <WalletProvider>
             <div className="mx-auto flex min-h-full w-full max-w-6xl flex-1 flex-col px-4 sm:px-6">
               <SiteHeader />
@@ -62,6 +64,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
               </footer>
             </div>
           </WalletProvider>
+          </DataProvider>
         </ConfigGate>
       </body>
     </html>

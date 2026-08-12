@@ -95,6 +95,38 @@ export function ReadError({
   );
 }
 
+/**
+ * A read that failed while readable data is already on screen.
+ *
+ * Replacing a rendered docket with an error panel because a background refresh
+ * was throttled throws away information the user could still act on, and
+ * overstates the problem: nothing is wrong with what they are looking at, it is
+ * just not being updated at the moment. This annotates instead.
+ *
+ * Deliberately not the alarm colour. Oxblood in this app means the contract
+ * reported tampering and nothing else, and a transient throttle must not
+ * borrow that meaning.
+ */
+export function StaleNotice({ error }: { error: unknown }) {
+  const failure = describeReadError(error);
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      className="mb-3 inline-flex items-center gap-2 border border-rule-strong bg-leaf px-2.5 py-1"
+    >
+      <span
+        aria-hidden
+        className="h-1.5 w-1.5 animate-pulse rounded-full bg-rule-strong"
+      />
+      <span className="stamp text-ink-muted">
+        {failure.rateLimited ? "RPC rate limited - retrying" : "Refresh failed - retrying"}
+      </span>
+      <span className="text-xs text-ink-faint">Showing the last known state.</span>
+    </p>
+  );
+}
+
 export function EmptyNote({ children }: { children: React.ReactNode }) {
   return (
     <p className="border border-dashed border-rule px-4 py-5 text-sm text-ink-muted">

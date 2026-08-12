@@ -573,7 +573,39 @@ export type ReadFailure = {
   readonly missing: boolean;
   /** Whether trying again could plausibly succeed. */
   readonly retryable: boolean;
+  /**
+   * The node refused because this client asked too often.
+   *
+   * Worth separating from every other failure: nothing is wrong with the node,
+   * the contract or the request, and the data already on screen is still valid.
+   * It is the one failure that should never replace a rendered docket, only
+   * annotate it.
+   */
+  readonly rateLimited: boolean;
 };
+
+/**
+ * StudioNet answers an over-budget client with "Rate limit exceeded: 30
+ * requests per minute" (and a 500/hour ceiling behind it). Depending on where
+ * it surfaces, that arrives as the message, as an HTTP 429, or wrapped in
+ * genlayer-js's generic "An unknown RPC error occurred" with the real text on
+ * the cause - so all three are checked rather than just the first.
+ */
+function looksRateLimited(error: unknown): boolean {
+  const parts = [
+    (error as { message?: unknown })?.message,
+    (error as { details?: unknown })?.details,
+    (error as { shortMessage?: unknown })?.shortMessage,
+    (error as { cause?: { message?: unknown } })?.cause?.message,
+  ]
+    .filter((part) => typeof part === "string")
+    .join("\n");
+  if (/rate limit|too many requests|429/i.test(parts)) return true;
+  const status =
+    (error as { status?: unknown })?.status ??
+    (error as { cause?: { status?: unknown } })?.cause?.status;
+  return status === 429;
+}
 
 /**
  * Turn a failed read into something a person can act on.
@@ -585,12 +617,26 @@ export type ReadFailure = {
  * retrying and is reported as such.
  */
 export function describeReadError(error: unknown): ReadFailure {
+  // Checked before everything else. A throttled request never reached the
+  // contract, so any receipt or message parsing below would be reading the
+  // node's refusal as though it were the contract's.
+  if (looksRateLimited(error)) {
+    return {
+      message: "The node is rate limiting this app. Waiting before trying again.",
+      detail: null,
+      missing: false,
+      retryable: true,
+      rateLimited: true,
+    };
+  }
+
   if (error instanceof ReadTimeoutError) {
     return {
       message: error.message,
       detail: null,
       missing: false,
       retryable: true,
+      rateLimited: false,
     };
   }
 
@@ -606,6 +652,7 @@ export function describeReadError(error: unknown): ReadFailure {
       // [EXPECTED] is a deliberate, deterministic refusal: it will refuse the
       // same way every time. Only the transient classes are worth retrying.
       retryable: errorClass === "TRANSIENT" || errorClass === "EXTERNAL",
+      rateLimited: false,
     };
   }
 
@@ -616,6 +663,7 @@ export function describeReadError(error: unknown): ReadFailure {
       detail: null,
       missing: false,
       retryable: true,
+      rateLimited: false,
     };
   }
 
@@ -626,6 +674,7 @@ export function describeReadError(error: unknown): ReadFailure {
     detail: raw || null,
     missing: false,
     retryable: true,
+    rateLimited: false,
   };
 }
 

@@ -17,7 +17,7 @@ import { chainNowSec, deadlineStatus } from "@/lib/time";
 import type { CaseRecord } from "@/lib/types";
 import { useWallet } from "./wallet";
 import { Amount, Countdown, StateBadge } from "./primitives";
-import { LoadingRows, ReadError } from "./states";
+import { LoadingRows, ReadError, StaleNotice } from "./states";
 import { attentionFor, viewerRoleFor } from "@/lib/roles";
 
 const PAGE_SIZE = 20;
@@ -69,7 +69,14 @@ export function CaseList() {
       </div>
 
       <div className="mt-6">
-        {page.error ? (
+        {/*
+          A failed refresh only takes over the view when there is nothing to
+          take over from. With cached rows in hand it becomes a note above them,
+          because the rows are still the last thing the chain actually said.
+        */}
+        {page.error && page.data ? <StaleNotice error={page.error} /> : null}
+
+        {page.error && !page.data ? (
           <ReadError error={page.error} onRetry={() => page.mutate()} />
         ) : page.isLoading && !page.data ? (
           <LoadingRows rows={4} />

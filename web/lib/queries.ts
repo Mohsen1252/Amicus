@@ -29,15 +29,48 @@ import {
 } from "./contract";
 import type { CaseRecord, ContractStats } from "./types";
 
-/** Chain state here changes on human timescales; 30s is attentive enough. */
-const REFRESH_MS = 30_000;
+/**
+ * How often to re-read, and why it is this slow.
+ *
+ * The docket is not one request. `fetchCasePage` asks `list_cases` and then one
+ * `get_case` per row, because the contract exposes no batched view - so a page
+ * of N cases costs N+1 requests, plus one for the stats.
+ *
+ * StudioNet allows 30 requests per minute and 500 per hour. At the previous 30s
+ * interval that arithmetic does not work:
+ *
+ *   5 cases,  30s -> 7 req/cycle -> 14 req/min ->  840 req/hour   over budget
+ *   5 cases, 120s -> 7 req/cycle -> 3.5 req/min -> 210 req/hour   fits
+ *
+ * The app was exceeding the hourly ceiling while sitting idle with nobody
+ * touching it, which is why the banner appeared "frequently" and seemingly at
+ * random. No amount of caching fixes that; the polling rate itself has to fit
+ * inside the budget.
+ */
+const REFRESH_MS = 120_000;
+
+/**
+ * Repeat reads of the same key within this window are served from cache.
+ *
+ * Mounting the docket and a case view together, or navigating back and forth,
+ * would otherwise re-ask the same questions seconds apart.
+ */
+const DEDUPE_MS = 60_000;
 
 const BASE: SWRConfiguration = {
   refreshInterval: REFRESH_MS,
-  revalidateOnFocus: true,
+  dedupingInterval: DEDUPE_MS,
+  /**
+   * Off deliberately. Every tab switch back to the app was a full docket
+   * re-read - N+1 requests for information that changes on human timescales.
+   * The interval above already keeps the view fresh, and a write refreshes
+   * explicitly through `useRefreshAfterWrite`.
+   */
+  revalidateOnFocus: false,
+  /** A reconnect is worth one read: the app may have been offline for hours. */
   revalidateOnReconnect: true,
   shouldRetryOnError: true,
-  errorRetryCount: 3,
+  errorRetryCount: 5,
   keepPreviousData: true,
 
   /**
@@ -55,11 +88,32 @@ const BASE: SWRConfiguration = {
    * change", and only the first one is safe to act on here.
    */
   onErrorRetry: (error, _key, config, revalidate, { retryCount }) => {
-    if (!describeReadError(error).retryable) return;
-    if (retryCount >= (config.errorRetryCount ?? 3)) return;
-    setTimeout(() => revalidate({ retryCount }), config.errorRetryInterval ?? 5_000);
+    const failure = describeReadError(error);
+    if (!failure.retryable) return;
+    if (retryCount >= (config.errorRetryCount ?? 5)) return;
+    setTimeout(() => revalidate({ retryCount }), backoffMs(retryCount, failure.rateLimited));
   },
 };
+
+/**
+ * How long to wait before retry number `retryCount`.
+ *
+ * Exponential, and deliberately slower when the node said "rate limit". Backing
+ * off gently from a throttle is worse than not retrying at all: each early
+ * attempt is itself a request, so it spends the budget that the wait was
+ * supposed to let recover. The first rate-limited retry therefore waits long
+ * enough for a per-minute window to roll over rather than a few seconds.
+ *
+ * Jitter matters here because the docket fires N+1 requests at once. Without
+ * it, every one of them would fail together and then retry together,
+ * reproducing the same burst that caused the throttle.
+ */
+function backoffMs(retryCount: number, rateLimited: boolean): number {
+  const base = rateLimited ? 20_000 : 3_000;
+  const ceiling = rateLimited ? 180_000 : 30_000;
+  const grown = Math.min(base * 2 ** retryCount, ceiling);
+  return grown * (0.75 + Math.random() * 0.5);
+}
 
 export const cacheKeys = {
   stats: () => ["stats"] as const,
