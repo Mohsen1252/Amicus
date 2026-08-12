@@ -25,6 +25,7 @@ import { ConfirmDialog } from "./confirm-dialog";
 import { ConsensusProgress } from "./consensus-progress";
 import { useWallet } from "./wallet";
 import { isNonDeterministic } from "@/lib/consensus";
+import { APPEAL_BOND_MULTIPLIER } from "@/lib/protocol";
 import { useSubmitAction } from "@/lib/use-submit-action";
 import { losingSideFor } from "@/lib/roles";
 import { chainNowSec, deadlineStatus } from "@/lib/time";
@@ -241,11 +242,17 @@ function statusLabel(status: string, label: string): string {
   return label;
 }
 
-/** What the contract requires to be sent with a payable action. */
+/**
+ * What the contract requires to be sent with a payable action.
+ *
+ * The multiplier is imported rather than written here. The contract checks this
+ * figure for *exact* equality, so a copy of it that drifted from the one the
+ * documentation quotes would either revert every appeal or, worse, quote the
+ * user one price and ask them to sign another.
+ */
 function valueFor(action: ActionName, record: CaseRecord): bigint {
   if (action === "accept_case") return record.bondAtto;
-  // APPEAL_BOND_MULTIPLIER in the contract.
-  if (action === "appeal") return record.bondAtto * 3n;
+  if (action === "appeal") return record.bondAtto * BigInt(APPEAL_BOND_MULTIPLIER);
   return 0n;
 }
 

@@ -182,8 +182,6 @@ export type CaseBundle = {
   readonly payout: PayoutRecord | null;
   /** Chain-side view of whether judging is open, rather than a local clock guess. */
   readonly isJudgeable: boolean;
-  /** When this bundle was read, for skew-aware countdowns. */
-  readonly readAtMs: number;
 };
 
 /**
@@ -216,7 +214,7 @@ export async function fetchCaseBundle(caseId: string): Promise<CaseBundle> {
     fetchIsJudgeable(caseId),
   ]);
 
-  return { record, evidence, judgments, payout, isJudgeable, readAtMs: Date.now() };
+  return { record, evidence, judgments, payout, isJudgeable };
 }
 
 /** A page of cases for the list view, each with the fields the list shows. */

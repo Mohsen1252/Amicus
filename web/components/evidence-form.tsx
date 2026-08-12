@@ -17,6 +17,11 @@
 import { useEffect, useMemo, useState } from "react";
 
 import { chainNowSec, deadlineStatus, formatTimestamp } from "@/lib/time";
+import {
+  MAX_STATEMENT_CHARS,
+  MAX_URLS_PER_SUBMISSION,
+  MAX_URL_CHARS,
+} from "@/lib/protocol";
 import { ConsensusProgress } from "./consensus-progress";
 import { useSubmitAction } from "@/lib/use-submit-action";
 import type { CaseRecord, ViewerRole } from "@/lib/types";
@@ -24,10 +29,14 @@ import { ConfirmDialog } from "./confirm-dialog";
 import { Countdown } from "./primitives";
 import { useWallet } from "./wallet";
 
-/** Mirrors MAX_URLS_PER_SUBMISSION, MAX_STATEMENT_CHARS, MAX_URL_CHARS. */
-const MAX_URLS = 3;
-const MAX_STATEMENT_CHARS = 4000;
-const MAX_URL_CHARS = 512;
+/**
+ * The contract's own caps, imported rather than restated.
+ *
+ * These drive what the form accepts, and the contract rejects anything past
+ * them. A local copy that drifted would let someone write four thousand
+ * characters into a box that the chain refuses.
+ */
+const MAX_URLS = MAX_URLS_PER_SUBMISSION;
 
 type UrlProblem = { readonly index: number; readonly message: string };
 
