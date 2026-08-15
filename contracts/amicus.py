@@ -76,7 +76,16 @@ TRANSITIONS = {
 ACTORS = {
     "accept_case": "respondent",
     "expire_draft": "anyone",
-    "release": "either_party",
+    # Cooperative release pays the disputed amount to the respondent (see
+    # _plan_payout, STATE_RELEASED). The claimant is the only party whose funds
+    # are handed over, so only the claimant may authorize it. Making this
+    # "either_party" let the respondent call release() and pay the claimant's
+    # escrowed amount to itself, unilaterally and outside any adjudication -
+    # exactly the bypass this must forbid. A respondent who wants to give up
+    # instead lets the case go to a dispute, where INSUFFICIENT_EVIDENCE returns
+    # the amount to the claimant. Funds thus leave escrow only on explicit
+    # claimant authorization here, or on a formal panel adjudication.
+    "release": "claimant",
     "open_dispute": "either_party",
     "submit_evidence": "either_party",
     "judge": "anyone",
@@ -1300,6 +1309,14 @@ class Amicus(gl.Contract):
 
     @gl.public.write
     def release(self, case_id: str) -> None:
+        """Claimant voluntarily settles: the amount is released to the respondent.
+
+        Authorization is claimant-only (see ACTORS["release"]). The respondent
+        cannot call this to release the claimant's escrowed funds to itself;
+        moving funds its way requires either this explicit claimant release or a
+        formal panel adjudication via judge()/judge_appeal(). _require_actor
+        enforces the caller check against gl.message.sender_address centrally.
+        """
         case = self._get_case(case_id)
         destination = self._require_transition("release", case)
         self._require_actor("release", case)

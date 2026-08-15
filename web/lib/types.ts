@@ -144,7 +144,7 @@ export const STATE_LABELS: Record<CaseState, string> = {
 
 export const STATE_DESCRIPTIONS: Record<CaseState, string> = {
   DRAFT: "Proposed by the claimant. Waiting for the respondent to post a matching bond.",
-  ACTIVE: "Both parties have bonded. Either can release the funds or open a dispute.",
+  ACTIVE: "Both parties have bonded. The claimant can release the funds, and either can open a dispute.",
   RELEASED: "Settled cooperatively. Waiting for the distribution to be executed.",
   DISPUTED: "A dispute is open. Both parties may file a statement until the deadline.",
   EVIDENCE: "Filings are open. Both parties may file until the deadline.",

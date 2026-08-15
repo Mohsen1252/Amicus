@@ -57,9 +57,13 @@ export const TRANSITIONS: Record<ActionName, Transition> = {
   release: {
     from: ["ACTIVE"],
     to: "RELEASED",
-    actor: "either_party",
+    // Claimant-only: release pays the amount to the respondent, so only the
+    // claimant (whose funds move) may authorize it. A respondent-initiated
+    // release would be an unauthorized taking of the claimant's escrow, which
+    // the contract now rejects.
+    actor: "claimant",
     label: "Release cooperatively",
-    summary: "Settle without a dispute: the amount goes to the respondent, both bonds return.",
+    summary: "Settle without a dispute: you send the amount to the respondent, both bonds return.",
     consequence:
       "This ends the case. The amount at stake goes to the respondent and no fee is charged. " +
       "It cannot be undone or disputed afterwards.",

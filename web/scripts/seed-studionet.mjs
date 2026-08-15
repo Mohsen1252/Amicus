@@ -241,7 +241,10 @@ async function buildCase(spec) {
   if (spec.target === "ACTIVE") return { caseId, state: spec.target };
 
   if (spec.target === "RELEASED" || spec.target === "PAID") {
-    await send(asRespondent, "release", {
+    // Cooperative release is claimant-authorized: it pays the escrowed amount to
+    // the respondent, so only the claimant (whose funds move) may trigger it.
+    // The contract rejects a respondent-initiated release.
+    await send(asClaimant, "release", {
       functionName: "release",
       args: [caseId],
       value: 0n,

@@ -32,7 +32,7 @@ export function ProtocolDocs() {
         <p className="mt-3 text-[0.9375rem] leading-relaxed text-ink-muted">
           Amicus is an escrow that settles agreements written in plain language. Two parties
           register what they agreed in ordinary prose and each posts a bond. If the deal goes
-          well, either side releases the funds. If it does not, the contract reads the
+          well, the claimant releases the funds to the respondent. If it does not, the contract reads the
           agreement, fetches the evidence both sides cite, and decides.
         </p>
         <p className="mt-3 text-[0.9375rem] leading-relaxed text-ink-muted">

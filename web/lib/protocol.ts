@@ -195,10 +195,11 @@ export const LIFECYCLE: readonly LifecycleStep[] = [
   {
     state: "RELEASED",
     title: "Or it simply goes well",
-    who: "Either party",
+    who: "Claimant",
     body:
-      "Either side can release cooperatively. The amount goes to the respondent, both bonds " +
-      "come home, and no fee is charged. Most cases should end here.",
+      "The claimant can release cooperatively. The amount goes to the respondent, both bonds " +
+      "come home, and no fee is charged. Because release pays the respondent, only the " +
+      "claimant may authorize it. Most cases should end here.",
   },
   {
     state: "DISPUTED",
