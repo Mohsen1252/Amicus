@@ -165,6 +165,106 @@ def test_appeal_overturned_conserves(amicus, direct_vm, parties):
     assert record["claimant_atto"] == 0
 
 
+@pytest.mark.parametrize(
+    "appellant_role,original_split_bps,resolved_split_bps",
+    [
+        ("claimant", 4000, 6500),
+        ("respondent", 6000, 3500),
+    ],
+)
+def test_favorable_split_reallocation_returns_appeal_bond(
+    appellant_role,
+    original_split_bps,
+    resolved_split_bps,
+    amicus,
+    direct_vm,
+    parties,
+):
+    """A SPLIT reallocated toward the appellant is a successful appeal."""
+    claimant, respondent = parties
+    appellant = claimant if appellant_role == "claimant" else respondent
+    case_id = judged_case(
+        amicus,
+        direct_vm,
+        claimant,
+        respondent,
+        outcome="SPLIT",
+        split_bps=original_split_bps,
+    )
+    direct_vm.clear_mocks()
+    appeal(amicus, direct_vm, appellant, case_id)
+
+    mock_tamper(direct_vm, False)
+    mock_appeal_judgment(
+        direct_vm, outcome="SPLIT", split_bps=resolved_split_bps
+    )
+    amicus.judge_appeal(case_id)
+    amicus.payout(case_id)
+
+    record = assert_conserved(amicus, direct_vm, case_id)
+    remainder = AMOUNT - FEE
+    claimant_cut = remainder * resolved_split_bps // 10000
+    expected_claimant = claimant_cut + BOND
+    expected_respondent = remainder - claimant_cut + BOND
+    if appellant_role == "claimant":
+        expected_claimant += APPEAL_BOND
+    else:
+        expected_respondent += APPEAL_BOND
+
+    assert record["claimant_atto"] == expected_claimant
+    assert record["respondent_atto"] == expected_respondent
+
+
+@pytest.mark.parametrize(
+    "appellant_role,original_split_bps,resolved_split_bps",
+    [
+        ("claimant", 4000, 2500),
+        ("respondent", 6000, 7500),
+    ],
+)
+def test_unfavorable_split_reallocation_forfeits_appeal_bond(
+    appellant_role,
+    original_split_bps,
+    resolved_split_bps,
+    amicus,
+    direct_vm,
+    parties,
+):
+    """A SPLIT reallocated away from the appellant upholds the first result."""
+    claimant, respondent = parties
+    appellant = claimant if appellant_role == "claimant" else respondent
+    case_id = judged_case(
+        amicus,
+        direct_vm,
+        claimant,
+        respondent,
+        outcome="SPLIT",
+        split_bps=original_split_bps,
+    )
+    direct_vm.clear_mocks()
+    appeal(amicus, direct_vm, appellant, case_id)
+
+    mock_tamper(direct_vm, False)
+    mock_appeal_judgment(
+        direct_vm, outcome="SPLIT", split_bps=resolved_split_bps
+    )
+    amicus.judge_appeal(case_id)
+    amicus.payout(case_id)
+
+    record = assert_conserved(amicus, direct_vm, case_id)
+    remainder = AMOUNT - FEE
+    claimant_cut = remainder * resolved_split_bps // 10000
+    expected_claimant = claimant_cut + BOND
+    expected_respondent = remainder - claimant_cut + BOND
+    if appellant_role == "claimant":
+        expected_respondent += APPEAL_BOND
+    else:
+        expected_claimant += APPEAL_BOND
+
+    assert record["claimant_atto"] == expected_claimant
+    assert record["respondent_atto"] == expected_respondent
+
+
 def test_expired_draft_conserves(amicus, direct_vm, parties):
     """The never-accepted draft: only the claimant ever deposited."""
     claimant, respondent = parties
@@ -275,6 +375,7 @@ def test_split_rounding_never_loses_an_atto(amount, split_bps, pure):
         appeal_bond_atto=0,
         appellant="",
         original_outcome="",
+        original_split_bps=0,
         fee_bps=FEE_BPS,
     )
     fee = amount * FEE_BPS // 10000
@@ -296,6 +397,7 @@ def test_split_dust_is_at_most_one_atto(pure):
                 state="FINAL", outcome="SPLIT", split_bps=split_bps,
                 atto_amount=amount, bond_atto=0, respondent_bonded=True,
                 appeal_bond_atto=0, appellant="", original_outcome="",
+                original_split_bps=0,
                 fee_bps=0,
             )
             assert result["claimant"] + result["respondent"] == amount
@@ -316,6 +418,7 @@ def test_conservation_holds_across_the_whole_outcome_matrix(pure):
                             atto_amount=AMOUNT, bond_atto=BOND,
                             respondent_bonded=True, appeal_bond_atto=appeal_bond,
                             appellant=appellant, original_outcome=original,
+                            original_split_bps=0,
                             fee_bps=FEE_BPS,
                         )
                         assert (
@@ -388,7 +491,8 @@ def test_fee_rounds_down_and_never_exceeds_the_amount(pure):
         result = pure._plan_payout(
             state="FINAL", outcome="CLAIMANT", split_bps=0, atto_amount=AMOUNT,
             bond_atto=BOND, respondent_bonded=True, appeal_bond_atto=0,
-            appellant="", original_outcome="", fee_bps=fee_bps,
+            appellant="", original_outcome="", original_split_bps=0,
+            fee_bps=fee_bps,
         )
         assert result["owner"] == AMOUNT * fee_bps // 10000
         assert result["owner"] <= AMOUNT
@@ -401,7 +505,7 @@ def test_fee_on_a_tiny_amount_rounds_to_zero_rather_than_up(pure):
     result = pure._plan_payout(
         state="FINAL", outcome="CLAIMANT", split_bps=0, atto_amount=1,
         bond_atto=0, respondent_bonded=True, appeal_bond_atto=0,
-        appellant="", original_outcome="", fee_bps=250,
+        appellant="", original_outcome="", original_split_bps=0, fee_bps=250,
     )
     assert result["owner"] == 0
     assert result["claimant"] == 1

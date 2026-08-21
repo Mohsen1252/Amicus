@@ -658,6 +658,7 @@ def _plan_payout(
     appeal_bond_atto: int,
     appellant: str,
     original_outcome: str,
+    original_split_bps: int,
     fee_bps: int,
 ) -> dict:
     """Compute the full distribution of everything the case holds.
@@ -709,8 +710,12 @@ def _plan_payout(
             respondent_share = bond_atto
 
         if appeal_bond_atto > 0:
-            overturned = outcome != original_outcome
-            appellant_wins_bond = overturned
+            appellant_wins_bond = outcome != original_outcome
+            if outcome == OUTCOME_SPLIT and original_outcome == OUTCOME_SPLIT:
+                if appellant == "claimant":
+                    appellant_wins_bond = split_bps > original_split_bps
+                else:
+                    appellant_wins_bond = split_bps < original_split_bps
             if appellant == "claimant":
                 if appellant_wins_bond:
                     claimant_share = claimant_share + appeal_bond_atto
@@ -1497,6 +1502,7 @@ class Amicus(gl.Contract):
             int(case.appeal_bond_atto),
             str(case.appellant),
             str(case.original_outcome),
+            int(case.original_split_bps),
             int(case.fee_bps),
         )
 
@@ -1683,6 +1689,7 @@ class Amicus(gl.Contract):
             int(case.appeal_bond_atto),
             str(case.appellant),
             str(case.original_outcome),
+            int(case.original_split_bps),
             int(case.fee_bps),
         )
 
